@@ -58,7 +58,7 @@ protected:
 	unsigned flushNumber;
 	unsigned branchNumber;
 	unsigned allocatedMemory;
-	BTBEntry **tagTakenTargetList;
+	BTBEntry *tagTakenTargetList;
 
 public:
 	BTB(unsigned btbSize, unsigned historySize, unsigned tagSize, unsigned fsmState,
@@ -78,7 +78,7 @@ BTB::BTB(unsigned btbSize, unsigned historySize, unsigned tagSize, unsigned fsmS
 	this->isGlobalHist = isGlobalHist;
 	this->isGlobalTable = isGlobalTable;
 	this->Shared = Shared;
-	this->tagTakenTargetList = new BTBEntry*[btbSize];
+	this->tagTakenTargetList = new BTBEntry[btbSize];
 }
 
 class BTB_GlobalHistoryGlobalFSM : public BTB{
@@ -90,6 +90,8 @@ public:
 	BTB_GlobalHistoryGlobalFSM(unsigned btbSize, unsigned historySize, unsigned tagSize, unsigned fsmInitialState,
 			bool isGlobalHist, bool isGlobalTable, int Shared);
 	bool Predict(uint32_t pc, uint32_t *dst);
+	void Update(uint32_t pc, uint32_t targetPc, bool taken, uint32_t pred_dst);
+	SIM_stats GetStats();
 	~BTB_GlobalHistoryGlobalFSM();
 };
 
@@ -104,14 +106,29 @@ BTB_GlobalHistoryGlobalFSM::BTB_GlobalHistoryGlobalFSM(unsigned btbSize, unsigne
 bool BTB_GlobalHistoryGlobalFSM::Predict(uint32_t pc, uint32_t *dst){
 	unsigned indexToSearchIn = parseBinary(pc, 3, btbSize);
 	unsigned tagToSearchFor = parseBinary(pc, 3 + btbSize, tagSize);
-	BTBEntry *btbEntry = this->tagTakenTargetList[indexToSearchIn];
-	if (btbEntry != nullptr && btbEntry->GetTag() == tagToSearchFor)
+	BTBEntry *btbEntry = &(this->tagTakenTargetList[indexToSearchIn]);
+	if (btbEntry->occupied && btbEntry->tag == tagToSearchFor)
 	{
-		*dst = btbEntry->GetTargetPc();
-		return btbEntry->GetTakenOrNotTaken();
+		*dst = btbEntry->targetPc;
+		return btbEntry->takenOrNotTaken;
 	}
 	*dst = pc + 4;
 	return false;
+}
+
+void BTB_GlobalHistoryGlobalFSM::Update(uint32_t pc, uint32_t targetPc, bool takenOrNotTaken, uint32_t pred_dst){
+	unsigned indexToSearchIn = parseBinary(pc, 3, btbSize);
+	unsigned tagToSearchFor = parseBinary(pc, 3 + btbSize, tagSize);
+	BTBEntry* btbEntry = &(this->tagTakenTargetList[indexToSearchIn]);
+	if (btbEntry->occupied && btbEntry->tag == tagToSearchFor)
+	{
+		btbEntry->targetPc = targetPc;
+		btbEntry->takenOrNotTaken = takenOrNotTaken;
+	}
+	else
+	{
+		this->tagTakenTargetList[indexToSearchIn] = BTBEntry(tagToSearchFor, targetPc, takenOrNotTaken);
+	}
 }
 
 class BTB_GlobalHistoryLocalFSM : public BTB{
@@ -216,19 +233,27 @@ void FSMEntry::UpdateFSM(bool taken){
 }
 
 class BTBEntry{
-	private:
+	public:
+		bool occupied;
 		unsigned tag;
-		bool taken;
+		bool takenOrNotTaken;
 		unsigned targetPc;
 
-	public:
+		BTBEntry();
 		BTBEntry(unsigned tag, bool taken, unsigned targetPc);
-		unsigned GetTag();
-		bool GetTakenOrNotTaken();
-		unsigned GetTargetPc();
-		void UpdateEntry(bool taken, unsigned targetPc = 0);
 		~BTBEntry();
 };
+
+BTBEntry::BTBEntry(){
+	this->occupied = false;
+}
+
+BTBEntry::BTBEntry(unsigned tag, bool taken, unsigned targetPc){
+	this->occupied = true;
+	this->tag = tag;
+	this->takenOrNotTaken = taken;
+	this->targetPc = targetPc;
+}
 
 
 /// @brief parses a binary number from startingIndex to startingIndex + numberOfBits
