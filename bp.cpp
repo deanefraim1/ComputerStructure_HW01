@@ -15,21 +15,27 @@ enum FSMState{
 	StronglyTaken = 3
 };
 
+enum SharedOption{
+	NotShared = 0,
+	LSBShared = 1,
+	MidShared = 2
+};
+
 BTB *btb;
 
 int BP_init(unsigned btbSize, unsigned historySize, unsigned tagSize, unsigned fsmState,
 			bool isGlobalHist, bool isGlobalTable, int Shared){
 	if(isGlobalHist && isGlobalTable)
-		btb = new BTB_GlobalHistoryGlobalFSM(btbSize, historySize, tagSize, fsmState, isGlobalHist, isGlobalTable, Shared);
+		btb = new BTB_GlobalHistoryGlobalFSM(btbSize, historySize, tagSize, fsmState, Shared);
 	
 	if(isGlobalHist && !isGlobalTable)
-		btb = new BTB_GlobalHistoryLocalFSM(btbSize, historySize, tagSize, fsmState, isGlobalHist, isGlobalTable, Shared);
+		btb = new BTB_GlobalHistoryLocalFSM(btbSize, historySize, tagSize, fsmState, Shared);
 	
 	if(!isGlobalHist && isGlobalTable)
-		btb = new BTB_LocalHistoryGlobalFSM(btbSize, historySize, tagSize, fsmState, isGlobalHist, isGlobalTable, Shared);
+		btb = new BTB_LocalHistoryGlobalFSM(btbSize, historySize, tagSize, fsmState, Shared);
 
 	if(!isGlobalHist && !isGlobalTable)
-		btb = new BTB_LocalHistoryLocalFSM(btbSize, historySize, tagSize, fsmState, isGlobalHist, isGlobalTable, Shared);
+		btb = new BTB_LocalHistoryLocalFSM(btbSize, historySize, tagSize, fsmState, Shared);
 	return -1;
 }
 
@@ -54,30 +60,38 @@ protected:
 	unsigned fsmState;
 	bool isGlobalHist;
 	bool isGlobalTable;
-	int Shared;
+	SharedOption sharedOption;
 	unsigned flushNumber;
 	unsigned branchNumber;
 	unsigned allocatedMemory;
 	BTBEntry *tagTakenTargetList;
 
 public:
-	BTB(unsigned btbSize, unsigned historySize, unsigned tagSize, unsigned fsmState,
-			bool isGlobalHist, bool isGlobalTable, int Shared);
+	BTB(unsigned btbSize, unsigned historySize, unsigned tagSize, int shared);
 	virtual bool Predict(uint32_t pc, uint32_t *dst) = 0;
 	virtual void Update(uint32_t pc, uint32_t targetPc, bool taken, uint32_t pred_dst) = 0;
 	virtual SIM_stats GetStats() = 0;
 	virtual ~BTB();
 };
 
-BTB::BTB(unsigned btbSize, unsigned historySize, unsigned tagSize, unsigned fsmState,
-			bool isGlobalHist, bool isGlobalTable, int Shared){
+BTB::BTB(unsigned btbSize, unsigned historySize, unsigned tagSize, int shared){
 	this->btbSize = btbSize;
 	this->historySize = historySize;
 	this->tagSize = tagSize;
-	this->fsmState = fsmState;
-	this->isGlobalHist = isGlobalHist;
-	this->isGlobalTable = isGlobalTable;
-	this->Shared = Shared;
+	switch (shared)
+	{
+	case 0:
+		this->sharedOption = NotShared;
+		break;
+	
+	case 1:
+		this->sharedOption = LSBShared;
+		break;
+	
+	case 2:
+		this->sharedOption = MidShared;
+		break;
+	}
 	this->tagTakenTargetList = new BTBEntry[btbSize];
 }
 
@@ -87,16 +101,14 @@ private:
 	FSMEntry *fsmTable;
 
 public:
-	BTB_GlobalHistoryGlobalFSM(unsigned btbSize, unsigned historySize, unsigned tagSize, unsigned fsmInitialState,
-			bool isGlobalHist, bool isGlobalTable, int Shared);
+	BTB_GlobalHistoryGlobalFSM(unsigned btbSize, unsigned historySize, unsigned tagSize, unsigned fsmInitialState, int Shared);
 	bool Predict(uint32_t pc, uint32_t *dst);
 	void Update(uint32_t pc, uint32_t targetPc, bool taken, uint32_t pred_dst);
 	SIM_stats GetStats();
 	~BTB_GlobalHistoryGlobalFSM();
 };
 
-BTB_GlobalHistoryGlobalFSM::BTB_GlobalHistoryGlobalFSM(unsigned btbSize, unsigned historySize, unsigned tagSize, unsigned fsmInitialState,
-			bool isGlobalHist, bool isGlobalTable, int Shared) : BTB(btbSize, historySize, tagSize, fsmInitialState, isGlobalHist, isGlobalTable, Shared){
+BTB_GlobalHistoryGlobalFSM::BTB_GlobalHistoryGlobalFSM(unsigned btbSize, unsigned historySize, unsigned tagSize, unsigned fsmInitialState, int Shared) : BTB(btbSize, historySize, tagSize, Shared){
 	history = HistoryEntry(historySize);
 	fsmTable = new FSMEntry*[2^historySize];
 	for(int i = 0; i < 2^historySize; i++)
