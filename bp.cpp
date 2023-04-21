@@ -58,8 +58,6 @@ protected:
 	unsigned historySize;
 	unsigned tagSize;
 	unsigned fsmState;
-	bool isGlobalHist;
-	bool isGlobalTable;
 	SharedOption sharedOption;
 	unsigned flushNumber;
 	unsigned branchNumber;
@@ -92,6 +90,9 @@ BTB::BTB(unsigned btbSize, unsigned historySize, unsigned tagSize, int shared){
 		this->sharedOption = MidShared;
 		break;
 	}
+	this->flushNumber = 0;
+	this->branchNumber = 0;
+	this->allocatedMemory = 0;
 	this->tagTakenTargetList = new BTBEntry[btbSize];
 }
 
@@ -110,7 +111,7 @@ public:
 
 BTB_GlobalHistoryGlobalFSM::BTB_GlobalHistoryGlobalFSM(unsigned btbSize, unsigned historySize, unsigned tagSize, unsigned fsmInitialState, int Shared) : BTB(btbSize, historySize, tagSize, Shared){
 	history = HistoryEntry(historySize);
-	fsmTable = new FSMEntry*[2^historySize];
+	fsmTable = new FSMEntry[2^historySize];
 	for(int i = 0; i < 2^historySize; i++)
 		fsmTable[i] = FSMEntry(fsmInitialState);
 }
@@ -184,11 +185,16 @@ class FSMEntry{
 		FSMState fsmState;
 
 	public:
+		FSMEntry();
 		FSMEntry(unsigned fsmInitialState);
 		bool GetPrediction();
 		void UpdateFSM(bool taken);
 		~FSMEntry();
 };
+
+FSMEntry::FSMEntry(){
+	this->fsmState = WeaklyNotTaken;
+}
 
 FSMEntry::FSMEntry(unsigned fsmInitialState){
 	switch (fsmInitialState)
