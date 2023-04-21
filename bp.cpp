@@ -8,6 +8,13 @@
 
 using namespace std;
 
+enum FSMState{
+	StronglyNotTaken = 0,
+	WeaklyNotTaken = 1,
+	WeaklyTaken = 2,
+	StronglyTaken = 3
+};
+
 BTB *btb;
 
 int BP_init(unsigned btbSize, unsigned historySize, unsigned tagSize, unsigned fsmState,
@@ -51,7 +58,7 @@ protected:
 	unsigned flushNumber;
 	unsigned branchNumber;
 	unsigned allocatedMemory;
-	tuple<unsigned, unsigned> *tagAndTargetList;
+	BTBEntry **tagTakenTargetList;
 
 public:
 	BTB(unsigned btbSize, unsigned historySize, unsigned tagSize, unsigned fsmState,
@@ -71,7 +78,7 @@ BTB::BTB(unsigned btbSize, unsigned historySize, unsigned tagSize, unsigned fsmS
 	this->isGlobalHist = isGlobalHist;
 	this->isGlobalTable = isGlobalTable;
 	this->Shared = Shared;
-	this->tagAndTargetList = new tuple<unsigned, unsigned>[btbSize];
+	this->tagTakenTargetList = new BTBEntry*[btbSize];
 }
 
 class BTB_GlobalHistoryGlobalFSM : public BTB{
@@ -95,7 +102,16 @@ BTB_GlobalHistoryGlobalFSM::BTB_GlobalHistoryGlobalFSM(unsigned btbSize, unsigne
 }
 
 bool BTB_GlobalHistoryGlobalFSM::Predict(uint32_t pc, uint32_t *dst){
-	bool excist = this->tagAndTargetList
+	unsigned indexToSearchIn = parseBinary(pc, 3, btbSize);
+	unsigned tagToSearchFor = parseBinary(pc, 3 + btbSize, tagSize);
+	BTBEntry *btbEntry = this->tagTakenTargetList[indexToSearchIn];
+	if (btbEntry != nullptr && btbEntry->GetTag() == tagToSearchFor)
+	{
+		*dst = btbEntry->GetTargetPc();
+		return btbEntry->GetTakenOrNotTaken();
+	}
+	*dst = pc + 4;
+	return false;
 }
 
 class BTB_GlobalHistoryLocalFSM : public BTB{
@@ -136,7 +152,7 @@ void HistoryEntry::UpdateHistory(bool taken){
 
 class FSMEntry{
 	private:
-		unsigned fsmState;
+		FSMState fsmState;
 
 	public:
 		FSMEntry(unsigned fsmInitialState);
@@ -146,20 +162,81 @@ class FSMEntry{
 };
 
 FSMEntry::FSMEntry(unsigned fsmInitialState){
-	this->fsmState = fsmInitialState;
+	switch (fsmInitialState)
+	{
+	case 0:
+		this->fsmState = StronglyNotTaken;
+		break;
+
+	case 1:
+		this->fsmState = WeaklyNotTaken;
+		break;
+
+	case 2:
+		this->fsmState = WeaklyTaken;
+		break;
+	
+	case 3:
+		this->fsmState = StronglyTaken;
+		break;
+	}
 }
 
 bool FSMEntry::GetPrediction(){
-	return fsmState > 1;
+	return fsmState == WeaklyTaken || fsmState == StronglyTaken;
 }
 
 void FSMEntry::UpdateFSM(bool taken){
-	if(taken){
-		if(fsmState < 3)
-			fsmState++;
+	switch (fsmState)
+	{
+	case StronglyNotTaken:
+		if(taken)
+			fsmState = WeaklyNotTaken;
+		break;
+
+	case WeaklyNotTaken:
+		if(taken)
+			fsmState = WeaklyTaken;
+		else
+			fsmState = StronglyNotTaken;
+		break;
+
+	case WeaklyTaken:
+		if(taken)
+			fsmState = StronglyTaken;
+		else
+			fsmState = WeaklyNotTaken;
+		break;
+	
+	case StronglyTaken:
+		if(!taken)
+			fsmState = WeaklyTaken;
+		break;
 	}
-	else{
-		if(fsmState > 0)
-			fsmState--;
-	}
+}
+
+class BTBEntry{
+	private:
+		unsigned tag;
+		bool taken;
+		unsigned targetPc;
+
+	public:
+		BTBEntry(unsigned tag, bool taken, unsigned targetPc);
+		unsigned GetTag();
+		bool GetTakenOrNotTaken();
+		unsigned GetTargetPc();
+		void UpdateEntry(bool taken, unsigned targetPc = 0);
+		~BTBEntry();
+};
+
+
+/// @brief parses a binary number from startingIndex to startingIndex + numberOfBits
+/// @param numberToParse the unsigned number to parse
+/// @param startingIndex the starting index to parse from (starting from index 0) (includes the starting index)
+/// @param numberOfBits the number of bits to parse
+/// @return the parsed number
+unsigned parseBinary(unsigned numberToParse, unsigned startingIndex, unsigned numberOfBits){
+	unsigned mask = (1 << numberOfBits) - 1;
+	return (numberToParse >> startingIndex) & mask;
 }
