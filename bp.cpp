@@ -6,6 +6,9 @@
 #include <vector>
 #include <tuple>
 
+#define LSB_SHARED_STARTING_INDEX 2
+#define MID_SHARED_STARTING_INDEX 16
+
 using namespace std;
 
 enum FSMState{
@@ -62,7 +65,7 @@ protected:
 	unsigned flushNumber;
 	unsigned branchNumber;
 	unsigned allocatedMemory;
-	BTBEntry *tagTakenTargetList;
+	BTBEntry *btb;
 
 public:
 	BTB(unsigned btbSize, unsigned historySize, unsigned tagSize, int shared);
@@ -93,13 +96,13 @@ BTB::BTB(unsigned btbSize, unsigned historySize, unsigned tagSize, int shared){
 	this->flushNumber = 0;
 	this->branchNumber = 0;
 	this->allocatedMemory = 0;
-	this->tagTakenTargetList = new BTBEntry[btbSize];
+	this->btb = new BTBEntry[btbSize];
 }
 
 class BTB_GlobalHistoryGlobalFSM : public BTB{
 private:
-	HistoryEntry history;
-	FSMEntry *fsmTable;
+	HistoryEntry globalHistoryEntry;
+	FSMEntry *globalFSMTable;
 
 public:
 	BTB_GlobalHistoryGlobalFSM(unsigned btbSize, unsigned historySize, unsigned tagSize, unsigned fsmInitialState, int Shared);
@@ -110,20 +113,24 @@ public:
 };
 
 BTB_GlobalHistoryGlobalFSM::BTB_GlobalHistoryGlobalFSM(unsigned btbSize, unsigned historySize, unsigned tagSize, unsigned fsmInitialState, int Shared) : BTB(btbSize, historySize, tagSize, Shared){
-	history = HistoryEntry(historySize);
-	fsmTable = new FSMEntry[2^historySize];
+	this->globalHistoryEntry = HistoryEntry(historySize);
+	globalFSMTable = new FSMEntry[2^historySize];
 	for(int i = 0; i < 2^historySize; i++)
-		fsmTable[i] = FSMEntry(fsmInitialState);
+	{
+		btb->history = globalHistoryEntry;
+		globalFSMTable[i] = FSMEntry(fsmInitialState);
+		btb->fsmTable = globalFSMTable;
+	}
 }
 
 bool BTB_GlobalHistoryGlobalFSM::Predict(uint32_t pc, uint32_t *dst){
-	unsigned indexToSearchIn = parseBinary(pc, 3, btbSize);
-	unsigned tagToSearchFor = parseBinary(pc, 3 + btbSize, tagSize);
-	BTBEntry *btbEntry = &(this->tagTakenTargetList[indexToSearchIn]);
+	unsigned indexToSearchIn = parseBinary(pc, 2, btbSize);
+	unsigned tagToSearchFor = parseBinary(pc, 2 + btbSize, tagSize);
+	BTBEntry *btbEntry = &(this->btb[indexToSearchIn]);
 	if (btbEntry->occupied && btbEntry->tag == tagToSearchFor)
 	{
 		*dst = btbEntry->targetPc;
-		return btbEntry->takenOrNotTaken;
+		// add return prediction
 	}
 	*dst = pc + 4;
 	return false;
@@ -132,15 +139,15 @@ bool BTB_GlobalHistoryGlobalFSM::Predict(uint32_t pc, uint32_t *dst){
 void BTB_GlobalHistoryGlobalFSM::Update(uint32_t pc, uint32_t targetPc, bool takenOrNotTaken, uint32_t pred_dst){
 	unsigned indexToSearchIn = parseBinary(pc, 3, btbSize);
 	unsigned tagToSearchFor = parseBinary(pc, 3 + btbSize, tagSize);
-	BTBEntry* btbEntry = &(this->tagTakenTargetList[indexToSearchIn]);
+	BTBEntry* btbEntry = &(this->btb[indexToSearchIn]);
 	if (btbEntry->occupied && btbEntry->tag == tagToSearchFor)
 	{
 		btbEntry->targetPc = targetPc;
-		btbEntry->takenOrNotTaken = takenOrNotTaken;
+		// add update prediction
 	}
 	else
 	{
-		this->tagTakenTargetList[indexToSearchIn] = BTBEntry(tagToSearchFor, targetPc, takenOrNotTaken);
+		this->btb[indexToSearchIn] = BTBEntry(tagToSearchFor, targetPc, &globalHistoryEntry, &globalFSMTable);
 	}
 }
 
@@ -254,11 +261,12 @@ class BTBEntry{
 	public:
 		bool occupied;
 		unsigned tag;
-		bool takenOrNotTaken;
 		unsigned targetPc;
+		HistoryEntry *history;
+		FSMEntry **fsmTable;
 
 		BTBEntry();
-		BTBEntry(unsigned tag, bool taken, unsigned targetPc);
+		BTBEntry(unsigned tag, unsigned targetPc, HistoryEntry *history, FSMEntry **fsmTable);
 		~BTBEntry();
 };
 
@@ -266,11 +274,12 @@ BTBEntry::BTBEntry(){
 	this->occupied = false;
 }
 
-BTBEntry::BTBEntry(unsigned tag, bool taken, unsigned targetPc){
+BTBEntry::BTBEntry(unsigned tag, unsigned targetPc, HistoryEntry *history, FSMEntry **fsmTable){
 	this->occupied = true;
 	this->tag = tag;
-	this->takenOrNotTaken = taken;
 	this->targetPc = targetPc;
+	this->history = history;
+	this->fsmTable = fsmTable;
 }
 
 
@@ -282,4 +291,21 @@ BTBEntry::BTBEntry(unsigned tag, bool taken, unsigned targetPc){
 unsigned parseBinary(unsigned numberToParse, unsigned startingIndex, unsigned numberOfBits){
 	unsigned mask = (1 << numberOfBits) - 1;
 	return (numberToParse >> startingIndex) & mask;
+}
+
+unsigned GetFSMTableIndex(unsigned history, unsigned historySize, uint32_t pc, SharedOption sharedOption){
+	switch (sharedOption)
+	{
+	case NotShared:
+		return history;
+		break;
+
+	case LSBShared:
+		return history ^ parseBinary(pc, LSB_SHARED_STARTING_INDEX, historySize);
+		break;
+
+	case MidShared:
+		return history ^ parseBinary(pc, MID_SHARED_STARTING_INDEX, historySize);
+		break;
+	}
 }
