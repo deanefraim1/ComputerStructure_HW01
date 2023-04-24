@@ -24,6 +24,88 @@ enum SharedOption{
 	MidShared = 2
 };
 
+class FSMEntry{
+	private:
+		FSMState fsmState;
+
+	public:
+		FSMEntry();
+		FSMEntry(unsigned fsmInitialState);
+		bool GetPrediction();
+		void UpdateFSM(bool taken);
+};
+
+class HistoryEntry{
+	private:
+		unsigned historySize;
+		unsigned history;
+		unsigned mask;
+
+	public:
+		HistoryEntry(unsigned historySize);
+		unsigned GetHistory();
+		unsigned GetHistorySize();
+		void UpdateHistory(bool taken);
+};
+
+class BTBEntry{
+	public:
+		bool occupied;
+		unsigned tag;
+		unsigned targetPc;
+		HistoryEntry *history;
+		FSMEntry **fsmTable;
+
+		BTBEntry();
+		BTBEntry(unsigned tag, unsigned targetPc, HistoryEntry *history, FSMEntry **fsmTable);
+		unsigned GetFSMTableIndex(uint32_t pc, SharedOption sharedOption);
+};
+
+class BTB{
+protected:
+	unsigned btbSize;
+	unsigned historySize;
+	unsigned tagSize;
+	unsigned fsmInitialState;
+	SharedOption sharedOption;
+	unsigned flushNumber;
+	unsigned branchNumber;
+	unsigned allocatedMemory;
+	BTBEntry *btbEntries;
+
+public:
+	BTB(unsigned btbSize, unsigned historySize, unsigned tagSize, unsigned fsmInitialState, int shared);
+	virtual bool Predict(uint32_t pc, uint32_t *dst) = 0;
+	virtual void Update(uint32_t pc, uint32_t targetPc, bool taken, uint32_t pred_dst) = 0;
+	SIM_stats GetStats();
+	virtual ~BTB();
+};
+
+class BTB_GlobalHistoryGlobalFSM : public BTB{
+private:
+	HistoryEntry globalHistoryEntry;
+	FSMEntry *globalFSMTable;
+
+public:
+	BTB_GlobalHistoryGlobalFSM(unsigned btbSize, unsigned historySize, unsigned tagSize, unsigned fsmInitialState, int Shared);
+	bool Predict(uint32_t pc, uint32_t *dst);
+	void Update(uint32_t pc, uint32_t targetPc, bool taken, uint32_t pred_dst);
+	~BTB_GlobalHistoryGlobalFSM();
+};
+
+class BTB_GlobalHistoryLocalFSM : public BTB{
+};
+
+class BTB_LocalHistoryGlobalFSM : public BTB{
+};
+
+class BTB_LocalHistoryLocalFSM : public BTB{
+};
+
+unsigned ParseBinary(unsigned numberToParse, unsigned startingIndex, unsigned numberOfBits); 
+unsigned GetFSMTableIndex(unsigned history, unsigned historySize, uint32_t pc, SharedOption sharedOption);
+unsigned GetNumberOfBitsFromDividableBy2(unsigned number);
+
 BTB *btb;
 
 int BP_init(unsigned btbSize, unsigned historySize, unsigned tagSize, unsigned fsmState,
@@ -31,22 +113,24 @@ int BP_init(unsigned btbSize, unsigned historySize, unsigned tagSize, unsigned f
 	if(isGlobalHist && isGlobalTable)
 		btb = new BTB_GlobalHistoryGlobalFSM(btbSize, historySize, tagSize, fsmState, Shared);
 	
-	if(isGlobalHist && !isGlobalTable)
-		btb = new BTB_GlobalHistoryLocalFSM(btbSize, historySize, tagSize, fsmState, Shared);
+	// if(isGlobalHist && !isGlobalTable)
+	// 	//btb = new BTB_GlobalHistoryLocalFSM(btbSize, historySize, tagSize, fsmState, Shared);
 	
-	if(!isGlobalHist && isGlobalTable)
-		btb = new BTB_LocalHistoryGlobalFSM(btbSize, historySize, tagSize, fsmState, Shared);
+	// if(!isGlobalHist && isGlobalTable)
+	// 	//btb = new BTB_LocalHistoryGlobalFSM(btbSize, historySize, tagSize, fsmState, Shared);
 
-	if(!isGlobalHist && !isGlobalTable)
-		btb = new BTB_LocalHistoryLocalFSM(btbSize, historySize, tagSize, fsmState, Shared);
-	return -1;
+	// if(!isGlobalHist && !isGlobalTable)
+	// 	//btb = new BTB_LocalHistoryLocalFSM(btbSize, historySize, tagSize, fsmState, Shared);
+		
+	return 0;
 }
 
 bool BP_predict(uint32_t pc, uint32_t *dst){
-	return false;
+	return btb->Predict(pc, dst);
 }
 
 void BP_update(uint32_t pc, uint32_t targetPc, bool taken, uint32_t pred_dst){
+	btb->Update(pc, targetPc, taken, pred_dst);
 	return;
 }
 
@@ -55,30 +139,11 @@ void BP_GetStats(SIM_stats *curStats){
 	return;
 }
 
-class BTB{
-protected:
-	unsigned btbSize;
-	unsigned historySize;
-	unsigned tagSize;
-	unsigned fsmState;
-	SharedOption sharedOption;
-	unsigned flushNumber;
-	unsigned branchNumber;
-	unsigned allocatedMemory;
-	BTBEntry *btb;
-
-public:
-	BTB(unsigned btbSize, unsigned historySize, unsigned tagSize, int shared);
-	virtual bool Predict(uint32_t pc, uint32_t *dst) = 0;
-	virtual void Update(uint32_t pc, uint32_t targetPc, bool taken, uint32_t pred_dst) = 0;
-	virtual SIM_stats GetStats() = 0;
-	virtual ~BTB();
-};
-
-BTB::BTB(unsigned btbSize, unsigned historySize, unsigned tagSize, int shared){
+BTB::BTB(unsigned btbSize, unsigned historySize, unsigned tagSize, unsigned fsmInitialState, int shared){
 	this->btbSize = btbSize;
 	this->historySize = historySize;
 	this->tagSize = tagSize;
+	this->fsmInitialState = fsmInitialState;
 	switch (shared)
 	{
 	case 0:
@@ -95,82 +160,79 @@ BTB::BTB(unsigned btbSize, unsigned historySize, unsigned tagSize, int shared){
 	}
 	this->flushNumber = 0;
 	this->branchNumber = 0;
-	this->allocatedMemory = 0;
-	this->btb = new BTBEntry[btbSize];
+	this->btbEntries = new BTBEntry[btbSize];
 }
 
-class BTB_GlobalHistoryGlobalFSM : public BTB{
-private:
-	HistoryEntry globalHistoryEntry;
-	FSMEntry *globalFSMTable;
+BTB::~BTB(){
+	delete[] this->btbEntries;
+}
 
-public:
-	BTB_GlobalHistoryGlobalFSM(unsigned btbSize, unsigned historySize, unsigned tagSize, unsigned fsmInitialState, int Shared);
-	bool Predict(uint32_t pc, uint32_t *dst);
-	void Update(uint32_t pc, uint32_t targetPc, bool taken, uint32_t pred_dst);
-	SIM_stats GetStats();
-	~BTB_GlobalHistoryGlobalFSM();
-};
+SIM_stats BTB::GetStats(){
+	SIM_stats stats;
+	stats.flush_num = this->flushNumber;
+	stats.br_num = this->branchNumber;
+	stats.size = this->allocatedMemory;
+	return stats;
+}
 
-BTB_GlobalHistoryGlobalFSM::BTB_GlobalHistoryGlobalFSM(unsigned btbSize, unsigned historySize, unsigned tagSize, unsigned fsmInitialState, int Shared) : BTB(btbSize, historySize, tagSize, Shared){
-	this->globalHistoryEntry = HistoryEntry(historySize);
-	globalFSMTable = new FSMEntry[2^historySize];
-	for(int i = 0; i < 2^historySize; i++)
+
+
+BTB_GlobalHistoryGlobalFSM::BTB_GlobalHistoryGlobalFSM(unsigned btbSize, unsigned historySize, unsigned tagSize, unsigned fsmInitialState, int Shared) : BTB(btbSize, historySize, tagSize, fsmInitialState, Shared), globalHistoryEntry(HistoryEntry(historySize)), globalFSMTable(new FSMEntry[2^historySize]){
+	for(int i = 0; i < 1 << historySize; i++)
 	{
-		btb->history = globalHistoryEntry;
 		globalFSMTable[i] = FSMEntry(fsmInitialState);
-		btb->fsmTable = globalFSMTable;
 	}
+	for (int i = 0; i < btbSize; i++)
+	{
+		btbEntries[i].history = &globalHistoryEntry;
+		btbEntries[i].fsmTable = &globalFSMTable;
+	}
+	this->allocatedMemory = this->tagSize * btbSize + this->historySize + ((2^historySize) * 2); // TODO - check if we need to add the target pc size
+}
+
+BTB_GlobalHistoryGlobalFSM::~BTB_GlobalHistoryGlobalFSM(){
+	delete[] this->globalFSMTable;
 }
 
 bool BTB_GlobalHistoryGlobalFSM::Predict(uint32_t pc, uint32_t *dst){
-	unsigned indexToSearchIn = parseBinary(pc, 2, btbSize);
-	unsigned tagToSearchFor = parseBinary(pc, 2 + btbSize, tagSize);
-	BTBEntry *btbEntry = &(this->btb[indexToSearchIn]);
-	if (btbEntry->occupied && btbEntry->tag == tagToSearchFor)
+	unsigned btbSizeBits = GetNumberOfBitsFromDividableBy2(btbSize);
+	unsigned indexToSearchIn = ParseBinary(pc, 2, btbSizeBits);
+	unsigned tagToSearchFor = ParseBinary(pc, 2 + btbSizeBits, tagSize);
+	BTBEntry *btbEntry = &(this->btbEntries[indexToSearchIn]);
+	if (btbEntry->occupied && btbEntry->tag == tagToSearchFor && btbEntry->fsmTable[btbEntry->GetFSMTableIndex(pc, this->sharedOption)]->GetPrediction())
 	{
 		*dst = btbEntry->targetPc;
-		// add return prediction
+		return true;
 	}
 	*dst = pc + 4;
 	return false;
 }
 
 void BTB_GlobalHistoryGlobalFSM::Update(uint32_t pc, uint32_t targetPc, bool takenOrNotTaken, uint32_t pred_dst){
-	unsigned indexToSearchIn = parseBinary(pc, 3, btbSize);
-	unsigned tagToSearchFor = parseBinary(pc, 3 + btbSize, tagSize);
-	BTBEntry* btbEntry = &(this->btb[indexToSearchIn]);
+	unsigned btbSizeBits = GetNumberOfBitsFromDividableBy2(btbSize);
+	unsigned indexToSearchIn = ParseBinary(pc, 2, btbSizeBits);
+	unsigned tagToSearchFor = ParseBinary(pc, 2 + btbSizeBits, tagSize);
+	BTBEntry *btbEntry = &(this->btbEntries[indexToSearchIn]);
+	this->globalHistoryEntry.UpdateHistory(takenOrNotTaken);
 	if (btbEntry->occupied && btbEntry->tag == tagToSearchFor)
 	{
 		btbEntry->targetPc = targetPc;
-		// add update prediction
 	}
 	else
 	{
-		this->btb[indexToSearchIn] = BTBEntry(tagToSearchFor, targetPc, &globalHistoryEntry, &globalFSMTable);
+		this->btbEntries[indexToSearchIn] = BTBEntry(tagToSearchFor, targetPc, &(this->globalHistoryEntry), &(this->globalFSMTable));
+		this->globalFSMTable[btbEntry->GetFSMTableIndex(pc, this->sharedOption)] = FSMEntry(this->fsmInitialState); // TODO - check if we need to update the prediction with default value
 	}
+	
+	if(!(this->globalFSMTable[btbEntry->GetFSMTableIndex(pc, this->sharedOption)].GetPrediction() == takenOrNotTaken && targetPc == pred_dst))
+	{
+		this->flushNumber++;
+	}
+	this->globalFSMTable[btbEntry->GetFSMTableIndex(pc, this->sharedOption)].UpdateFSM(takenOrNotTaken);
+	this->branchNumber++;
 }
 
-class BTB_GlobalHistoryLocalFSM : public BTB{
-};
 
-class BTB_LocalHistoryGlobalFSM : public BTB{
-};
-
-class BTB_LocalHistoryLocalFSM : public BTB{
-};
-
-class HistoryEntry{
-	private:
-		unsigned historySize;
-		unsigned history;
-		unsigned mask;
-
-	public:
-		HistoryEntry(unsigned historySize);
-		unsigned GetHistory();
-		void UpdateHistory(bool taken);
-};
 
 HistoryEntry::HistoryEntry(unsigned historySize){
 	this->historySize = historySize;
@@ -182,22 +244,16 @@ unsigned HistoryEntry::GetHistory(){
 	return history;
 }
 
+unsigned HistoryEntry::GetHistorySize(){
+	return historySize;
+}
+
 void HistoryEntry::UpdateHistory(bool taken){
 	history = (history << 1) | taken;
 	history = history & mask;
 }
 
-class FSMEntry{
-	private:
-		FSMState fsmState;
 
-	public:
-		FSMEntry();
-		FSMEntry(unsigned fsmInitialState);
-		bool GetPrediction();
-		void UpdateFSM(bool taken);
-		~FSMEntry();
-};
 
 FSMEntry::FSMEntry(){
 	this->fsmState = WeaklyNotTaken;
@@ -257,18 +313,7 @@ void FSMEntry::UpdateFSM(bool taken){
 	}
 }
 
-class BTBEntry{
-	public:
-		bool occupied;
-		unsigned tag;
-		unsigned targetPc;
-		HistoryEntry *history;
-		FSMEntry **fsmTable;
 
-		BTBEntry();
-		BTBEntry(unsigned tag, unsigned targetPc, HistoryEntry *history, FSMEntry **fsmTable);
-		~BTBEntry();
-};
 
 BTBEntry::BTBEntry(){
 	this->occupied = false;
@@ -282,30 +327,38 @@ BTBEntry::BTBEntry(unsigned tag, unsigned targetPc, HistoryEntry *history, FSMEn
 	this->fsmTable = fsmTable;
 }
 
+unsigned BTBEntry::GetFSMTableIndex(uint32_t pc, SharedOption sharedOption){
+	switch (sharedOption)
+	{
+	case NotShared:
+		return this->history->GetHistory();
+		break;
+
+	case LSBShared:
+		return this->history->GetHistory() ^ ParseBinary(pc, LSB_SHARED_STARTING_INDEX, this->history->GetHistorySize());
+		break;
+
+	case MidShared:
+		return this->history->GetHistory() ^ ParseBinary(pc, MID_SHARED_STARTING_INDEX, this->history->GetHistorySize());
+		break;
+	}
+}
+
 
 /// @brief parses a binary number from startingIndex to startingIndex + numberOfBits
 /// @param numberToParse the unsigned number to parse
 /// @param startingIndex the starting index to parse from (starting from index 0) (includes the starting index)
 /// @param numberOfBits the number of bits to parse
 /// @return the parsed number
-unsigned parseBinary(unsigned numberToParse, unsigned startingIndex, unsigned numberOfBits){
+unsigned ParseBinary(unsigned numberToParse, unsigned startingIndex, unsigned numberOfBits){
 	unsigned mask = (1 << numberOfBits) - 1;
 	return (numberToParse >> startingIndex) & mask;
 }
 
-unsigned GetFSMTableIndex(unsigned history, unsigned historySize, uint32_t pc, SharedOption sharedOption){
-	switch (sharedOption)
-	{
-	case NotShared:
-		return history;
-		break;
-
-	case LSBShared:
-		return history ^ parseBinary(pc, LSB_SHARED_STARTING_INDEX, historySize);
-		break;
-
-	case MidShared:
-		return history ^ parseBinary(pc, MID_SHARED_STARTING_INDEX, historySize);
-		break;
-	}
+unsigned GetNumberOfBitsFromDividableBy2(unsigned number){
+	unsigned log = 0;
+	while (number >>= 1)
+		log++;
+	return log;
+	
 }
