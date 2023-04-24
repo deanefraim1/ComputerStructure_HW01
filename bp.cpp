@@ -8,6 +8,8 @@
 
 #define LSB_SHARED_STARTING_INDEX 2
 #define MID_SHARED_STARTING_INDEX 16
+#define VALID_BIT=1
+#define TARGET_BITS=30
 
 using namespace std;
 
@@ -60,6 +62,7 @@ class BTBEntry{
 		BTBEntry(unsigned tag, unsigned targetPc, HistoryEntry *history, FSMEntry *fsmTable);
 		unsigned GetFSMTableIndex(uint32_t pc, SharedOption sharedOption);
 };
+
 
 class BTB{
 protected:
@@ -187,7 +190,7 @@ BTB_GlobalHistoryGlobalFSM::BTB_GlobalHistoryGlobalFSM(unsigned btbSize, unsigne
 		btbEntries[i].history = &globalHistoryEntry;
 		btbEntries[i].fsmTable = globalFSMTable;
 	}
-	this->allocatedMemory = this->tagSize * btbSize + this->historySize + ((1 << historySize) * 2); // TODO - check if we need to add the target pc size
+	this->allocatedMemory = this->(tagSize+TARGET_BITS+VALID_BIT)* btbSize + this->historySize + ((1 << historySize) * 2); // TODO - check if we need to add the target pc size
 }
 
 BTB_GlobalHistoryGlobalFSM::~BTB_GlobalHistoryGlobalFSM(){
