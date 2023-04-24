@@ -177,8 +177,8 @@ SIM_stats BTB::GetStats(){
 
 
 
-BTB_GlobalHistoryGlobalFSM::BTB_GlobalHistoryGlobalFSM(unsigned btbSize, unsigned historySize, unsigned tagSize, unsigned fsmInitialState, int Shared) : BTB(btbSize, historySize, tagSize, fsmInitialState, Shared), globalHistoryEntry(HistoryEntry(historySize)), globalFSMTable(new FSMEntry[2^historySize]){
-	for(int i = 0; i < 1 << historySize; i++)
+BTB_GlobalHistoryGlobalFSM::BTB_GlobalHistoryGlobalFSM(unsigned btbSize, unsigned historySize, unsigned tagSize, unsigned fsmInitialState, int Shared) : BTB(btbSize, historySize, tagSize, fsmInitialState, Shared), globalHistoryEntry(HistoryEntry(historySize)), globalFSMTable(new FSMEntry[1 << historySize]){
+	for(int i = 0; i < (1 << historySize); i++)
 	{
 		globalFSMTable[i] = FSMEntry(fsmInitialState);
 	}
@@ -187,7 +187,7 @@ BTB_GlobalHistoryGlobalFSM::BTB_GlobalHistoryGlobalFSM(unsigned btbSize, unsigne
 		btbEntries[i].history = &globalHistoryEntry;
 		btbEntries[i].fsmTable = &globalFSMTable;
 	}
-	this->allocatedMemory = this->tagSize * btbSize + this->historySize + ((2^historySize) * 2); // TODO - check if we need to add the target pc size
+	this->allocatedMemory = this->tagSize * btbSize + this->historySize + ((1 << historySize) * 2); // TODO - check if we need to add the target pc size
 }
 
 BTB_GlobalHistoryGlobalFSM::~BTB_GlobalHistoryGlobalFSM(){
@@ -281,7 +281,7 @@ FSMEntry::FSMEntry(unsigned fsmInitialState){
 }
 
 bool FSMEntry::GetPrediction(){
-	return fsmState == WeaklyTaken || fsmState == StronglyTaken;
+	return this->fsmState == WeaklyTaken || this->fsmState == StronglyTaken;
 }
 
 void FSMEntry::UpdateFSM(bool taken){
