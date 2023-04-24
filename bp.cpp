@@ -54,10 +54,10 @@ class BTBEntry{
 		unsigned tag;
 		unsigned targetPc;
 		HistoryEntry *history;
-		FSMEntry **fsmTable;
+		FSMEntry *fsmTable;
 
 		BTBEntry();
-		BTBEntry(unsigned tag, unsigned targetPc, HistoryEntry *history, FSMEntry **fsmTable);
+		BTBEntry(unsigned tag, unsigned targetPc, HistoryEntry *history, FSMEntry *fsmTable);
 		unsigned GetFSMTableIndex(uint32_t pc, SharedOption sharedOption);
 };
 
@@ -185,7 +185,7 @@ BTB_GlobalHistoryGlobalFSM::BTB_GlobalHistoryGlobalFSM(unsigned btbSize, unsigne
 	for (int i = 0; i < btbSize; i++)
 	{
 		btbEntries[i].history = &globalHistoryEntry;
-		btbEntries[i].fsmTable = &globalFSMTable;
+		btbEntries[i].fsmTable = globalFSMTable;
 	}
 	this->allocatedMemory = this->tagSize * btbSize + this->historySize + ((1 << historySize) * 2); // TODO - check if we need to add the target pc size
 }
@@ -199,7 +199,7 @@ bool BTB_GlobalHistoryGlobalFSM::Predict(uint32_t pc, uint32_t *dst){
 	unsigned indexToSearchIn = ParseBinary(pc, 2, btbSizeBits);
 	unsigned tagToSearchFor = ParseBinary(pc, 2 + btbSizeBits, tagSize);
 	BTBEntry *btbEntry = &(this->btbEntries[indexToSearchIn]);
-	if (btbEntry->occupied && btbEntry->tag == tagToSearchFor && btbEntry->fsmTable[btbEntry->GetFSMTableIndex(pc, this->sharedOption)]->GetPrediction())
+	if (btbEntry->occupied && btbEntry->tag == tagToSearchFor && btbEntry->fsmTable[btbEntry->GetFSMTableIndex(pc, this->sharedOption)].GetPrediction())
 	{
 		*dst = btbEntry->targetPc;
 		return true;
@@ -220,7 +220,7 @@ void BTB_GlobalHistoryGlobalFSM::Update(uint32_t pc, uint32_t targetPc, bool tak
 	}
 	else
 	{
-		this->btbEntries[indexToSearchIn] = BTBEntry(tagToSearchFor, targetPc, &(this->globalHistoryEntry), &(this->globalFSMTable));
+		this->btbEntries[indexToSearchIn] = BTBEntry(tagToSearchFor, targetPc, &(this->globalHistoryEntry), this->globalFSMTable);
 		this->globalFSMTable[btbEntry->GetFSMTableIndex(pc, this->sharedOption)] = FSMEntry(this->fsmInitialState); // TODO - check if we need to update the prediction with default value
 	}
 	
@@ -319,7 +319,7 @@ BTBEntry::BTBEntry(){
 	this->occupied = false;
 }
 
-BTBEntry::BTBEntry(unsigned tag, unsigned targetPc, HistoryEntry *history, FSMEntry **fsmTable){
+BTBEntry::BTBEntry(unsigned tag, unsigned targetPc, HistoryEntry *history, FSMEntry *fsmTable){
 	this->occupied = true;
 	this->tag = tag;
 	this->targetPc = targetPc;
