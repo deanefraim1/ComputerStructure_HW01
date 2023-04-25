@@ -215,7 +215,13 @@ void BTB_GlobalHistoryGlobalFSM::Update(uint32_t pc, uint32_t targetPc, bool tak
 	unsigned indexToSearchIn = ParseBinary(pc, 2, btbSizeBits);
 	unsigned tagToSearchFor = ParseBinary(pc, 2 + btbSizeBits, tagSize);
 	BTBEntry *btbEntry = &(this->btbEntries[indexToSearchIn]);
-	this->globalHistoryEntry.UpdateHistory(takenOrNotTaken);
+	bool cur_prediction;
+	if (btbEntry->occupied && btbEntry->tag == tagToSearchFor &&btbEntry->fsmTable[btbEntry->GetFSMTableIndex(pc, this->sharedOption)].GetPrediction()){ // TODO: the sec condition depend on the initial state
+		cur_prediction=true;
+	}
+	else{
+		cur_prediction=false;
+	}
 	if (btbEntry->occupied && btbEntry->tag == tagToSearchFor)
 	{
 		btbEntry->targetPc = targetPc;
@@ -223,14 +229,14 @@ void BTB_GlobalHistoryGlobalFSM::Update(uint32_t pc, uint32_t targetPc, bool tak
 	else
 	{
 		this->btbEntries[indexToSearchIn] = BTBEntry(tagToSearchFor, targetPc, &(this->globalHistoryEntry), this->globalFSMTable);
-		this->globalFSMTable[btbEntry->GetFSMTableIndex(pc, this->sharedOption)] = FSMEntry(this->fsmInitialState); // TODO - check if we need to update the prediction with default value
 	}
 	
-	if(!(this->globalFSMTable[btbEntry->GetFSMTableIndex(pc, this->sharedOption)].GetPrediction() == takenOrNotTaken && targetPc == pred_dst))
+	if((cur_prediction != takenOrNotTaken )|| (cur_prediction == true && takenOrNotTaken ==true && pred_dst != targetPc))
 	{
 		this->flushNumber++;
 	}
 	this->globalFSMTable[btbEntry->GetFSMTableIndex(pc, this->sharedOption)].UpdateFSM(takenOrNotTaken);
+	this->globalHistoryEntry.UpdateHistory(takenOrNotTaken);
 	this->branchNumber++;
 }
 
