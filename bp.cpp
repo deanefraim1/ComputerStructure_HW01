@@ -66,9 +66,10 @@ class BTBEntry{
 class BTB{
 protected:
 	unsigned btbSize;
+	unsigned btbSizeBits;
 	unsigned historySize;
 	unsigned tagSize;
-	unsigned fsmInitialState;
+	FSMState fsmInitialState;
 	SharedOption sharedOption;
 	unsigned flushNumber;
 	unsigned branchNumber;
@@ -80,6 +81,7 @@ public:
 	virtual bool Predict(uint32_t pc, uint32_t *dst) = 0;
 	virtual void Update(uint32_t pc, uint32_t targetPc, bool taken, uint32_t pred_dst) = 0;
 	SIM_stats GetStats();
+	BTBEntry *GetBTBEntry(uint32_t pc);
 	virtual ~BTB();
 };
 
@@ -96,6 +98,9 @@ public:
 };
 
 class BTB_GlobalHistoryLocalFSM : public BTB{
+private:
+	HistoryEntry globalHistoryEntry;
+	FSMEntry **localFSMTables;
 };
 
 class BTB_LocalHistoryGlobalFSM : public BTB{
@@ -107,6 +112,8 @@ class BTB_LocalHistoryLocalFSM : public BTB{
 unsigned ParseBinary(unsigned numberToParse, unsigned startingIndex, unsigned numberOfBits); 
 unsigned GetFSMTableIndex(unsigned history, unsigned historySize, uint32_t pc, SharedOption sharedOption);
 unsigned GetNumberOfBitsFromDividableBy2(unsigned number);
+bool GetPredictionFromFSMState(FSMState state);
+FSMState ParseNumberAsFSMState(unsigned number);
 
 BTB *btb;
 
@@ -145,7 +152,8 @@ BTB::BTB(unsigned btbSize, unsigned historySize, unsigned tagSize, unsigned fsmI
 	this->btbSize = btbSize;
 	this->historySize = historySize;
 	this->tagSize = tagSize;
-	this->fsmInitialState = fsmInitialState;
+	this->fsmInitialState = ParseNumberAsFSMState(fsmInitialState);
+	this->btbSizeBits = GetNumberOfBitsFromDividableBy2(btbSize);
 	switch (shared)
 	{
 	case 0:
@@ -197,10 +205,8 @@ BTB_GlobalHistoryGlobalFSM::~BTB_GlobalHistoryGlobalFSM(){
 }
 
 bool BTB_GlobalHistoryGlobalFSM::Predict(uint32_t pc, uint32_t *dst){
-	unsigned btbSizeBits = GetNumberOfBitsFromDividableBy2(btbSize);
-	unsigned indexToSearchIn = ParseBinary(pc, 2, btbSizeBits);
-	unsigned tagToSearchFor = ParseBinary(pc, 2 + btbSizeBits, tagSize);
-	BTBEntry *btbEntry = &(this->btbEntries[indexToSearchIn]);
+	unsigned tagToSearchFor = ParseBinary(pc, 2 + this->btbSizeBits, tagSize);
+	BTBEntry *btbEntry = this->GetBTBEntry(pc);
 	if (btbEntry->occupied && btbEntry->tag == tagToSearchFor && btbEntry->fsmTable[btbEntry->GetFSMTableIndex(pc, this->sharedOption)].GetPrediction())
 	{
 		*dst = btbEntry->targetPc;
@@ -210,33 +216,30 @@ bool BTB_GlobalHistoryGlobalFSM::Predict(uint32_t pc, uint32_t *dst){
 	return false;
 }
 
-void BTB_GlobalHistoryGlobalFSM::Update(uint32_t pc, uint32_t targetPc, bool takenOrNotTaken, uint32_t pred_dst){
-	unsigned btbSizeBits = GetNumberOfBitsFromDividableBy2(btbSize);
-	unsigned indexToSearchIn = ParseBinary(pc, 2, btbSizeBits);
-	unsigned tagToSearchFor = ParseBinary(pc, 2 + btbSizeBits, tagSize);
-	BTBEntry *btbEntry = &(this->btbEntries[indexToSearchIn]);
-	bool cur_prediction;
-	if (btbEntry->occupied && btbEntry->tag == tagToSearchFor &&btbEntry->fsmTable[btbEntry->GetFSMTableIndex(pc, this->sharedOption)].GetPrediction()){ // TODO: the sec condition depend on the initial state
-		cur_prediction=true;
-	}
-	else{
-		cur_prediction=false;
-	}
+void BTB_GlobalHistoryGlobalFSM::Update(uint32_t pc, uint32_t targetPc, bool actualTakenOrNotTaken, uint32_t btbPredictionDestination){
+	unsigned tagToSearchFor = ParseBinary(pc, 2 + this->btbSizeBits, tagSize);
+	BTBEntry *btbEntry = GetBTBEntry(pc);
+	int fsmTableIndex = btbEntry->GetFSMTableIndex(pc, this->sharedOption);
+
+	// If we found the entry in the BTB
 	if (btbEntry->occupied && btbEntry->tag == tagToSearchFor)
 	{
 		btbEntry->targetPc = targetPc;
+		bool btbPrediction = btbEntry->fsmTable[fsmTableIndex].GetPrediction();
+		if(btbPrediction != actualTakenOrNotTaken)
+			this->flushNumber++;
 	}
+	// Else we need to add the entry to the BTB
 	else
 	{
-		this->btbEntries[indexToSearchIn] = BTBEntry(tagToSearchFor, targetPc, &(this->globalHistoryEntry), this->globalFSMTable);
+		*btbEntry = BTBEntry(tagToSearchFor, targetPc, &(this->globalHistoryEntry), this->globalFSMTable);
+		if(actualTakenOrNotTaken != GetPredictionFromFSMState(this->fsmInitialState))
+			this->flushNumber++;
 	}
-	
-	if((cur_prediction != takenOrNotTaken )|| (cur_prediction == true && takenOrNotTaken ==true && pred_dst != targetPc))
-	{
-		this->flushNumber++;
-	}
-	this->globalFSMTable[btbEntry->GetFSMTableIndex(pc, this->sharedOption)].UpdateFSM(takenOrNotTaken);
-	this->globalHistoryEntry.UpdateHistory(takenOrNotTaken);
+
+	// Update the FSM and the history
+	this->globalFSMTable[fsmTableIndex].UpdateFSM(actualTakenOrNotTaken);
+	this->globalHistoryEntry.UpdateHistory(actualTakenOrNotTaken);
 	this->branchNumber++;
 }
 
@@ -268,28 +271,11 @@ FSMEntry::FSMEntry(){
 }
 
 FSMEntry::FSMEntry(unsigned fsmInitialState){
-	switch (fsmInitialState)
-	{
-	case 0:
-		this->fsmState = StronglyNotTaken;
-		break;
-
-	case 1:
-		this->fsmState = WeaklyNotTaken;
-		break;
-
-	case 2:
-		this->fsmState = WeaklyTaken;
-		break;
-	
-	case 3:
-		this->fsmState = StronglyTaken;
-		break;
-	}
+	this->fsmState = ParseNumberAsFSMState(fsmInitialState);
 }
 
 bool FSMEntry::GetPrediction(){
-	return this->fsmState == WeaklyTaken || this->fsmState == StronglyTaken;
+	return GetPredictionFromFSMState(this->fsmState);
 }
 
 void FSMEntry::UpdateFSM(bool taken){
@@ -369,4 +355,36 @@ unsigned GetNumberOfBitsFromDividableBy2(unsigned number){
 		log++;
 	return log;
 	
+}
+
+BTBEntry *BTB::GetBTBEntry(uint32_t pc){
+	unsigned btbSizeBits = GetNumberOfBitsFromDividableBy2(btbSize);
+	unsigned indexToSearchIn = ParseBinary(pc, 2, btbSizeBits);
+	return &(this->btbEntries[indexToSearchIn]);
+}
+
+bool GetPredictionFromFSMState(FSMState state)
+{
+	return state == WeaklyTaken || state == StronglyTaken;
+}
+
+FSMState ParseNumberAsFSMState(unsigned number)
+{
+	switch (number)
+	{
+	case 0:
+		return StronglyNotTaken;
+
+	case 1:
+		return WeaklyNotTaken;
+
+	case 2:
+		return WeaklyTaken;
+	
+	case 3:
+		return StronglyTaken;
+
+	default:
+		return WeaklyNotTaken;
+	}
 }
