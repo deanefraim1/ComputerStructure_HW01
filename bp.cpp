@@ -122,6 +122,13 @@ public:
 };
 
 class BTB_LocalHistoryLocalFSM : public BTB{
+private:
+	HistoryEntry *localHistoryEntries;
+	FSMEntry **localFSMTables;
+
+public:
+	BTB_LocalHistoryLocalFSM(unsigned btbSize, unsigned historySize, unsigned tagSize, unsigned fsmInitialState, int Shared);
+	~BTB_LocalHistoryLocalFSM();
 };
 
 unsigned ParseBinary(unsigned numberToParse, unsigned startingIndex, unsigned numberOfBits); 
@@ -303,6 +310,34 @@ BTB_LocalHistoryGlobalFSM::BTB_LocalHistoryGlobalFSM(unsigned btbSize, unsigned 
 BTB_LocalHistoryGlobalFSM::~BTB_LocalHistoryGlobalFSM(){
 	delete[] this->localHistoryEntries;
 	delete[] this->globalFSMTable;
+}
+
+BTB_LocalHistoryLocalFSM::BTB_LocalHistoryLocalFSM(unsigned btbSize, unsigned historySize, unsigned tagSize, unsigned fsmInitialState, int Shared) : BTB(btbSize, historySize, tagSize, fsmInitialState, Shared){
+	this->localHistoryEntries = new HistoryEntry[btbSize];
+	this->localFSMTables = new FSMEntry*[btbSize];
+	for(int i = 0; i < btbSize; i++)
+	{
+		localFSMTables[i] = new FSMEntry[1 << historySize];
+		for (int j = 0; j < (1 << historySize); j++)
+		{
+			localFSMTables[i][j] = FSMEntry(fsmInitialState);
+		}
+		localHistoryEntries[i] = HistoryEntry(historySize);
+		btbEntries[i].history = &localHistoryEntries[i];
+		btbEntries[i].fsmTable = localFSMTables[i];
+	}
+	this->allocatedMemory = (this->tagSize+TARGET_BITS+VALID_BIT) * btbSize + this->historySize * btbSize + ((1 << historySize) * btbSize * 2);
+	this->isLocalHistory = true;
+	this->isLocalFSMTable = true;
+}
+
+BTB_LocalHistoryLocalFSM::~BTB_LocalHistoryLocalFSM(){
+	for(int i = 0; i < btbSize; i++)
+	{
+		delete[] localFSMTables[i];
+	}
+	delete[] localFSMTables;
+	delete[] localHistoryEntries;
 }
 
 HistoryEntry::HistoryEntry(){
