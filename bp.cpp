@@ -35,6 +35,7 @@ class FSMEntry{
 		FSMEntry(unsigned fsmInitialState);
 		bool GetPrediction();
 		void UpdateFSM(bool taken);
+		void ResetFSMEntry(FSMState fsmInitialState);
 };
 
 class HistoryEntry{
@@ -48,6 +49,7 @@ class HistoryEntry{
 		unsigned GetHistory();
 		unsigned GetHistorySize();
 		void UpdateHistory(bool taken);
+		void ResetHistory();
 };
 
 class BTBEntry{
@@ -61,6 +63,7 @@ class BTBEntry{
 		BTBEntry();
 		BTBEntry(unsigned tag, unsigned targetPc, HistoryEntry *history, FSMEntry *fsmTable);
 		unsigned GetFSMTableIndex(uint32_t pc, SharedOption sharedOption);
+		void UpdateBTBEntry(unsigned tag, unsigned targetPc, bool isLocalHistory, bool isLocalFSMTable, FSMState fsmInitialState);
 };
 
 class BTB{
@@ -76,12 +79,12 @@ protected:
 	unsigned allocatedMemory;
 	BTBEntry *btbEntries;
 	bool isLocalHistory;
-	bool isLocalFSMTable; // dsfasass
+	bool isLocalFSMTable;
 
 public:
 	BTB(unsigned btbSize, unsigned historySize, unsigned tagSize, unsigned fsmInitialState, int shared);
-	virtual bool Predict(uint32_t pc, uint32_t *dst) = 0;
-	virtual void Update(uint32_t pc, uint32_t targetPc, bool taken, uint32_t pred_dst) = 0;
+	bool Predict(uint32_t pc, uint32_t *dst);
+	void Update(uint32_t pc, uint32_t targetPc, bool taken, uint32_t pred_dst);
 	SIM_stats GetStats();
 	BTBEntry *GetBTBEntry(uint32_t pc);
 	virtual ~BTB();
@@ -94,8 +97,6 @@ private:
 
 public:
 	BTB_GlobalHistoryGlobalFSM(unsigned btbSize, unsigned historySize, unsigned tagSize, unsigned fsmInitialState, int Shared);
-	bool Predict(uint32_t pc, uint32_t *dst);
-	void Update(uint32_t pc, uint32_t targetPc, bool taken, uint32_t pred_dst);
 	~BTB_GlobalHistoryGlobalFSM();
 };
 
@@ -103,6 +104,10 @@ class BTB_GlobalHistoryLocalFSM : public BTB{
 private:
 	HistoryEntry globalHistoryEntry;
 	FSMEntry **localFSMTables;
+
+public:
+	BTB_GlobalHistoryLocalFSM(unsigned btbSize, unsigned historySize, unsigned tagSize, unsigned fsmInitialState, int Shared);
+	~BTB_GlobalHistoryLocalFSM();
 };
 
 class BTB_LocalHistoryGlobalFSM : public BTB{
@@ -124,8 +129,8 @@ int BP_init(unsigned btbSize, unsigned historySize, unsigned tagSize, unsigned f
 	if(isGlobalHist && isGlobalTable)
 		btb = new BTB_GlobalHistoryGlobalFSM(btbSize, historySize, tagSize, fsmState, Shared);
 	
-	// if(isGlobalHist && !isGlobalTable)
-	// 	//btb = new BTB_GlobalHistoryLocalFSM(btbSize, historySize, tagSize, fsmState, Shared);
+	if(isGlobalHist && !isGlobalTable)
+		btb = new BTB_GlobalHistoryLocalFSM(btbSize, historySize, tagSize, fsmState, Shared);
 	
 	// if(!isGlobalHist && isGlobalTable)
 	// 	//btb = new BTB_LocalHistoryGlobalFSM(btbSize, historySize, tagSize, fsmState, Shared);
@@ -187,26 +192,7 @@ SIM_stats BTB::GetStats(){
 	return stats;
 }
 
-
-
-BTB_GlobalHistoryGlobalFSM::BTB_GlobalHistoryGlobalFSM(unsigned btbSize, unsigned historySize, unsigned tagSize, unsigned fsmInitialState, int Shared) : BTB(btbSize, historySize, tagSize, fsmInitialState, Shared), globalHistoryEntry(HistoryEntry(historySize)), globalFSMTable(new FSMEntry[1 << historySize]){
-	for(int i = 0; i < (1 << historySize); i++)
-	{
-		globalFSMTable[i] = FSMEntry(fsmInitialState);
-	}
-	for (int i = 0; i < btbSize; i++)
-	{
-		btbEntries[i].history = &globalHistoryEntry;
-		btbEntries[i].fsmTable = globalFSMTable;
-	}
-	this->allocatedMemory = (this->tagSize+TARGET_BITS+VALID_BIT)* btbSize + this->historySize + ((1 << historySize) * 2); // TODO - check if we need to add the target pc size
-}
-
-BTB_GlobalHistoryGlobalFSM::~BTB_GlobalHistoryGlobalFSM(){
-	delete[] this->globalFSMTable;
-}
-
-bool BTB_GlobalHistoryGlobalFSM::Predict(uint32_t pc, uint32_t *dst){
+bool BTB::Predict(uint32_t pc, uint32_t *dst){
 	unsigned tagToSearchFor = ParseBinary(pc, 2 + this->btbSizeBits, tagSize);
 	BTBEntry *btbEntry = this->GetBTBEntry(pc);
 	if (btbEntry->occupied && btbEntry->tag == tagToSearchFor && btbEntry->fsmTable[btbEntry->GetFSMTableIndex(pc, this->sharedOption)].GetPrediction())
@@ -218,34 +204,81 @@ bool BTB_GlobalHistoryGlobalFSM::Predict(uint32_t pc, uint32_t *dst){
 	return false;
 }
 
-void BTB_GlobalHistoryGlobalFSM::Update(uint32_t pc, uint32_t targetPc, bool actualTakenOrNotTaken, uint32_t btbPredictionDestination){
+void BTB::Update(uint32_t pc, uint32_t targetPc, bool actualTakenOrNotTaken, uint32_t btbPredictionDestination){
 	unsigned tagToSearchFor = ParseBinary(pc, 2 + this->btbSizeBits, tagSize);
 	BTBEntry *btbEntry = GetBTBEntry(pc);
 	int fsmTableIndex = btbEntry->GetFSMTableIndex(pc, this->sharedOption);
-
+	bool btbPrediction = btbEntry->fsmTable[fsmTableIndex].GetPrediction();
 	// If we found the entry in the BTB
 	if (btbEntry->occupied && btbEntry->tag == tagToSearchFor)
 	{
 		btbEntry->targetPc = targetPc;
-		bool btbPrediction = btbEntry->fsmTable[fsmTableIndex].GetPrediction();
-		if(btbPrediction != actualTakenOrNotTaken)
+		if(btbPrediction != actualTakenOrNotTaken || (btbPrediction == true && actualTakenOrNotTaken == true && btbPredictionDestination != targetPc))
 			this->flushNumber++;
 	}
 	// Else we need to add the entry to the BTB
 	else
 	{
-		*btbEntry = BTBEntry(tagToSearchFor, targetPc, &(this->globalHistoryEntry), this->globalFSMTable);
-		if(actualTakenOrNotTaken != GetPredictionFromFSMState(this->fsmInitialState))
+		btbEntry->UpdateBTBEntry(tagToSearchFor, targetPc, this->isLocalHistory, this->isLocalFSMTable, this->fsmInitialState);
+
+		// if the actual prediction was Taken, we need to flush because we assume NotTaken
+		if(actualTakenOrNotTaken == true)
 			this->flushNumber++;
 	}
 
 	// Update the FSM and the history
-	this->globalFSMTable[fsmTableIndex].UpdateFSM(actualTakenOrNotTaken);
-	this->globalHistoryEntry.UpdateHistory(actualTakenOrNotTaken);
+	btbEntry->fsmTable[fsmTableIndex].UpdateFSM(actualTakenOrNotTaken);
+	btbEntry->history->UpdateHistory(actualTakenOrNotTaken);
 	this->branchNumber++;
 }
 
+BTB_GlobalHistoryGlobalFSM::BTB_GlobalHistoryGlobalFSM(unsigned btbSize, unsigned historySize, unsigned tagSize, unsigned fsmInitialState, int Shared) : BTB(btbSize, historySize, tagSize, fsmInitialState, Shared), globalHistoryEntry(HistoryEntry(historySize)){
+	this->globalFSMTable = new FSMEntry[1 << historySize];
+	for (int i = 0; i < (1 << historySize); i++)
+	{
+		globalFSMTable[i] = FSMEntry(fsmInitialState);
+	}
+	for (int i = 0; i < btbSize; i++)
+	{
+		btbEntries[i].history = &globalHistoryEntry;
+		btbEntries[i].fsmTable = globalFSMTable;
+	}
+	this->allocatedMemory = (this->tagSize+TARGET_BITS+VALID_BIT) * btbSize + this->historySize + ((1 << historySize) * 2);
+	this->isLocalHistory = false;
+	this->isLocalFSMTable = false;
+}
 
+BTB_GlobalHistoryGlobalFSM::~BTB_GlobalHistoryGlobalFSM(){
+	delete[] this->globalFSMTable;
+}
+
+BTB_GlobalHistoryLocalFSM::BTB_GlobalHistoryLocalFSM(unsigned btbSize, unsigned historySize, unsigned tagSize, unsigned fsmInitialState, int Shared) : BTB(btbSize, historySize, tagSize, fsmInitialState, Shared), globalHistoryEntry(HistoryEntry(historySize)){
+	this->localFSMTables = new FSMEntry*[btbSize];
+	for(int i = 0; i < btbSize; i++)
+	{
+		localFSMTables[i] = new FSMEntry[1 << historySize];
+		for (int j = 0; j < (1 << historySize); j++)
+		{
+			localFSMTables[i][j] = FSMEntry(fsmInitialState);
+		}
+	}
+	for (int i = 0; i < btbSize; i++)
+	{
+		btbEntries[i].history = &globalHistoryEntry;
+		btbEntries[i].fsmTable = localFSMTables[i];
+	}
+	this->allocatedMemory = (this->tagSize+TARGET_BITS+VALID_BIT) * btbSize + this->historySize + ((1 << historySize) * btbSize * 2);
+	this->isLocalHistory = false;
+	this->isLocalFSMTable = true;
+}
+
+BTB_GlobalHistoryLocalFSM::~BTB_GlobalHistoryLocalFSM(){
+	for(int i = 0; i < btbSize; i++)
+	{
+		delete[] localFSMTables[i];
+	}
+	delete[] localFSMTables;
+}
 
 HistoryEntry::HistoryEntry(unsigned historySize){
 	this->historySize = historySize;
@@ -266,7 +299,9 @@ void HistoryEntry::UpdateHistory(bool taken){
 	history = history & mask;
 }
 
-
+void HistoryEntry::ResetHistory(){
+	this->history = 0;
+}
 
 FSMEntry::FSMEntry(){
 	this->fsmState = WeaklyNotTaken;
@@ -309,7 +344,9 @@ void FSMEntry::UpdateFSM(bool taken){
 	}
 }
 
-
+void FSMEntry::ResetFSMEntry(FSMState fsmInitialState){
+	this->fsmState = fsmInitialState;
+}
 
 BTBEntry::BTBEntry(){
 	this->occupied = false;
@@ -340,6 +377,16 @@ unsigned BTBEntry::GetFSMTableIndex(uint32_t pc, SharedOption sharedOption){
 	}
 }
 
+void BTBEntry::UpdateBTBEntry(unsigned tag, unsigned targetPc, bool isLocalHistory, bool isLocalFSMTable, FSMState fsmInitialState){
+	this->occupied = true;
+	this->tag = tag;
+	this->targetPc = targetPc;
+	if(isLocalHistory)
+		this->history->ResetHistory();
+	if(isLocalFSMTable)
+		for(int i = 0; i < (1 << this->history->GetHistorySize()); i++)
+			this->fsmTable[i].ResetFSMEntry(fsmInitialState);
+}
 
 /// @brief parses a binary number from startingIndex to startingIndex + numberOfBits
 /// @param numberToParse the unsigned number to parse
