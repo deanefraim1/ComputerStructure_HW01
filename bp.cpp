@@ -287,9 +287,11 @@ BTB_GlobalHistoryLocalFSM::~BTB_GlobalHistoryLocalFSM(){
 
 BTB_LocalHistoryGlobalFSM::BTB_LocalHistoryGlobalFSM(unsigned btbSize, unsigned historySize, unsigned tagSize, unsigned fsmInitialState, int Shared) : BTB(btbSize, historySize, tagSize, fsmInitialState, Shared){
 	this->localHistoryEntries = new HistoryEntry[btbSize];
+	this->globalFSMTable = new FSMEntry[1 << historySize];
 	for (int i = 0; i < btbSize; i++)
 	{
 		localHistoryEntries[i] = HistoryEntry(historySize);
+		globalFSMTable[i] = FSMEntry(fsmInitialState);
 		btbEntries[i].history = &localHistoryEntries[i];
 		btbEntries[i].fsmTable = globalFSMTable;
 	}
@@ -300,6 +302,7 @@ BTB_LocalHistoryGlobalFSM::BTB_LocalHistoryGlobalFSM(unsigned btbSize, unsigned 
 
 BTB_LocalHistoryGlobalFSM::~BTB_LocalHistoryGlobalFSM(){
 	delete[] this->localHistoryEntries;
+	delete[] this->globalFSMTable;
 }
 
 HistoryEntry::HistoryEntry(){
