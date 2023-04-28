@@ -147,11 +147,11 @@ int BP_init(unsigned btbSize, unsigned historySize, unsigned tagSize, unsigned f
 	if(isGlobalHist && !isGlobalTable)
 		btb = new BTB_GlobalHistoryLocalFSM(btbSize, historySize, tagSize, fsmState, Shared);
 	
-	// if(!isGlobalHist && isGlobalTable)
-	// 	//btb = new BTB_LocalHistoryGlobalFSM(btbSize, historySize, tagSize, fsmState, Shared);
+	if(!isGlobalHist && isGlobalTable)
+		btb = new BTB_LocalHistoryGlobalFSM(btbSize, historySize, tagSize, fsmState, Shared);
 
-	// if(!isGlobalHist && !isGlobalTable)
-	// 	//btb = new BTB_LocalHistoryLocalFSM(btbSize, historySize, tagSize, fsmState, Shared);
+	if(!isGlobalHist && !isGlobalTable)
+		btb = new BTB_LocalHistoryLocalFSM(btbSize, historySize, tagSize, fsmState, Shared);
 		
 	return 0;
 }
@@ -295,10 +295,14 @@ BTB_GlobalHistoryLocalFSM::~BTB_GlobalHistoryLocalFSM(){
 BTB_LocalHistoryGlobalFSM::BTB_LocalHistoryGlobalFSM(unsigned btbSize, unsigned historySize, unsigned tagSize, unsigned fsmInitialState, int Shared) : BTB(btbSize, historySize, tagSize, fsmInitialState, Shared){
 	this->localHistoryEntries = new HistoryEntry[btbSize];
 	this->globalFSMTable = new FSMEntry[1 << historySize];
+	
+	for(int i = 0; i < (1 << historySize); i++)
+	{
+		globalFSMTable[i] = FSMEntry(fsmInitialState);
+	}
 	for (int i = 0; i < btbSize; i++)
 	{
 		localHistoryEntries[i] = HistoryEntry(historySize);
-		globalFSMTable[i] = FSMEntry(fsmInitialState);
 		btbEntries[i].history = &localHistoryEntries[i];
 		btbEntries[i].fsmTable = globalFSMTable;
 	}
