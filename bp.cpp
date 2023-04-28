@@ -75,6 +75,8 @@ protected:
 	unsigned branchNumber;
 	unsigned allocatedMemory;
 	BTBEntry *btbEntries;
+	bool isLocalHistory;
+	bool isLocalFSMTable; // dsfasass
 
 public:
 	BTB(unsigned btbSize, unsigned historySize, unsigned tagSize, unsigned fsmInitialState, int shared);
