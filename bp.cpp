@@ -45,6 +45,7 @@ class HistoryEntry{
 		unsigned mask;
 
 	public:
+		HistoryEntry();
 		HistoryEntry(unsigned historySize);
 		unsigned GetHistory();
 		unsigned GetHistorySize();
@@ -111,6 +112,13 @@ public:
 };
 
 class BTB_LocalHistoryGlobalFSM : public BTB{
+private:
+	HistoryEntry *localHistoryEntries;
+	FSMEntry *globalFSMTable;
+
+public:
+	BTB_LocalHistoryGlobalFSM(unsigned btbSize, unsigned historySize, unsigned tagSize, unsigned fsmInitialState, int Shared);
+	~BTB_LocalHistoryGlobalFSM();
 };
 
 class BTB_LocalHistoryLocalFSM : public BTB{
@@ -222,7 +230,7 @@ void BTB::Update(uint32_t pc, uint32_t targetPc, bool actualTakenOrNotTaken, uin
 		btbEntry->UpdateBTBEntry(tagToSearchFor, targetPc, this->isLocalHistory, this->isLocalFSMTable, this->fsmInitialState);
 
 		// if the actual prediction was Taken, we need to flush because we assume NotTaken
-		if(actualTakenOrNotTaken == true)
+		if(actualTakenOrNotTaken == true) // TODO - check if we need to flush if the actual targetPC is PC + 4
 			this->flushNumber++;
 	}
 
@@ -261,9 +269,6 @@ BTB_GlobalHistoryLocalFSM::BTB_GlobalHistoryLocalFSM(unsigned btbSize, unsigned 
 		{
 			localFSMTables[i][j] = FSMEntry(fsmInitialState);
 		}
-	}
-	for (int i = 0; i < btbSize; i++)
-	{
 		btbEntries[i].history = &globalHistoryEntry;
 		btbEntries[i].fsmTable = localFSMTables[i];
 	}
@@ -278,6 +283,29 @@ BTB_GlobalHistoryLocalFSM::~BTB_GlobalHistoryLocalFSM(){
 		delete[] localFSMTables[i];
 	}
 	delete[] localFSMTables;
+}
+
+BTB_LocalHistoryGlobalFSM::BTB_LocalHistoryGlobalFSM(unsigned btbSize, unsigned historySize, unsigned tagSize, unsigned fsmInitialState, int Shared) : BTB(btbSize, historySize, tagSize, fsmInitialState, Shared){
+	this->localHistoryEntries = new HistoryEntry[btbSize];
+	for (int i = 0; i < btbSize; i++)
+	{
+		localHistoryEntries[i] = HistoryEntry(historySize);
+		btbEntries[i].history = &localHistoryEntries[i];
+		btbEntries[i].fsmTable = globalFSMTable;
+	}
+	this->allocatedMemory = (this->tagSize+TARGET_BITS+VALID_BIT) * btbSize + this->historySize * btbSize + ((1 << historySize) * 2);
+	this->isLocalHistory = true;
+	this->isLocalFSMTable = false;
+}
+
+BTB_LocalHistoryGlobalFSM::~BTB_LocalHistoryGlobalFSM(){
+	delete[] this->localHistoryEntries;
+}
+
+HistoryEntry::HistoryEntry(){
+	this->historySize = 0;
+	this->history = 0;
+	this->mask = 0;
 }
 
 HistoryEntry::HistoryEntry(unsigned historySize){
