@@ -235,7 +235,7 @@ void BTB::Update(uint32_t pc, uint32_t targetPc, bool actualTakenOrNotTaken, uin
 	else
 	{
 		btbEntry->UpdateBTBEntry(tagToSearchFor, targetPc, this->isLocalHistory, this->isLocalFSMTable, this->fsmInitialState);
-
+		fsmTableIndex = btbEntry->GetFSMTableIndex(pc, this->sharedOption);
 		// if the actual prediction was Taken, we need to flush because we assume NotTaken
 		if(actualTakenOrNotTaken == true) // TODO - check if we need to flush if the actual targetPC is PC + 4
 			this->flushNumber++;
@@ -282,6 +282,7 @@ BTB_GlobalHistoryLocalFSM::BTB_GlobalHistoryLocalFSM(unsigned btbSize, unsigned 
 	this->allocatedMemory = (this->tagSize+TARGET_BITS+VALID_BIT) * btbSize + this->historySize + ((1 << historySize) * btbSize * 2);
 	this->isLocalHistory = false;
 	this->isLocalFSMTable = true;
+	this->sharedOption = NotShared;
 }
 
 BTB_GlobalHistoryLocalFSM::~BTB_GlobalHistoryLocalFSM(){
@@ -327,12 +328,13 @@ BTB_LocalHistoryLocalFSM::BTB_LocalHistoryLocalFSM(unsigned btbSize, unsigned hi
 			localFSMTables[i][j] = FSMEntry(fsmInitialState);
 		}
 		localHistoryEntries[i] = HistoryEntry(historySize);
-		btbEntries[i].history = &localHistoryEntries[i];
+		btbEntries[i].history = &(localHistoryEntries[i]);
 		btbEntries[i].fsmTable = localFSMTables[i];
 	}
 	this->allocatedMemory = (this->tagSize+TARGET_BITS+VALID_BIT) * btbSize + this->historySize * btbSize + ((1 << historySize) * btbSize * 2);
 	this->isLocalHistory = true;
 	this->isLocalFSMTable = true;
+	this->sharedOption = NotShared;
 }
 
 BTB_LocalHistoryLocalFSM::~BTB_LocalHistoryLocalFSM(){
