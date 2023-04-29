@@ -223,7 +223,7 @@ void BTB::Update(uint32_t pc, uint32_t targetPc, bool actualTakenOrNotTaken, uin
 	unsigned tagToSearchFor = ParseBinary(pc, 2 + this->btbSizeBits, tagSize);
 	BTBEntry *btbEntry = GetBTBEntry(pc);
 	int fsmTableIndex = btbEntry->GetFSMTableIndex(pc, this->sharedOption);
-	bool btbPrediction = btbEntry->fsmTable[fsmTableIndex].GetPrediction();
+	bool btbPrediction = btbEntry->occupied && btbEntry->tag == tagToSearchFor && btbEntry->fsmTable[btbEntry->GetFSMTableIndex(pc, this->sharedOption)].GetPrediction();
 	// If we found the entry in the BTB
 	if (btbEntry->occupied && btbEntry->tag == tagToSearchFor)
 	{
@@ -303,7 +303,7 @@ BTB_LocalHistoryGlobalFSM::BTB_LocalHistoryGlobalFSM(unsigned btbSize, unsigned 
 	for (int i = 0; i < btbSize; i++)
 	{
 		localHistoryEntries[i] = HistoryEntry(historySize);
-		btbEntries[i].history = &localHistoryEntries[i];
+		btbEntries[i].history = &(localHistoryEntries[i]);
 		btbEntries[i].fsmTable = globalFSMTable;
 	}
 	this->allocatedMemory = (this->tagSize+TARGET_BITS+VALID_BIT) * btbSize + this->historySize * btbSize + ((1 << historySize) * 2);
