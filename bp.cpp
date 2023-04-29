@@ -235,9 +235,9 @@ void BTB::Update(uint32_t pc, uint32_t targetPc, bool actualTakenOrNotTaken, uin
 	else
 	{
 		btbEntry->UpdateBTBEntry(tagToSearchFor, targetPc, this->isLocalHistory, this->isLocalFSMTable, this->fsmInitialState);
-		fsmTableIndex = btbEntry->GetFSMTableIndex(pc, this->sharedOption);
+		fsmTableIndex = btbEntry->GetFSMTableIndex(pc, this->sharedOption); // needs to be updated because we added a new entry with a new history
 		// if the actual prediction was Taken, we need to flush because we assume NotTaken
-		if(actualTakenOrNotTaken == true) // TODO - check if we need to flush if the actual targetPC is PC + 4
+		if(actualTakenOrNotTaken == true)
 			this->flushNumber++;
 	}
 
